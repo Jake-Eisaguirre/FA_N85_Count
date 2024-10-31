@@ -1,0 +1,56 @@
+---
+title: "FA_N85_Count"
+format: html
+editor: source
+---
+
+```{r}
+if (!require(librarian)){
+  install.packages("librarian")
+  library(librarian)
+}
+
+# librarian downloads, if not already downloaded, and reads in needed packages
+librarian::shelf(tidyverse, here, DBI, odbc, padr)
+
+```
+
+```{r}
+tryCatch({  # Attempts the database connection and catches any errors
+    db_connection <- DBI::dbConnect(odbc::odbc(),  # Creates a connection using the ODBC driver
+                             Driver="SnowflakeDSIIDriver",  # Specifies the Snowflake ODBC driver
+                             Server="hawaiianair.west-us-2.azure.snowflakecomputing.com",  # Points to the Snowflake server
+                             WAREHOUSE="DATA_LAKE_READER",  # Selects the data warehouse
+                             Database="ENTERPRISE",  # Selects the Enterprise database
+                             UID= Sys.getenv("UID"),  # Retrieves the user ID from the environment variables
+                             authenticator = "externalbrowser")  # Uses external browser authentication
+    print("Database Connected!")  # Prints a message if the connection is successful
+    },
+    error=function(cond) {  # Defines error handling if the connection fails
+            print("Unable to connect to Database.")  # Prints an error message
+})
+
+# Set search_path
+dbExecute(db_connection, "USE SCHEMA CREW_ANALYTICS")  # Sets the working schema to 'CREW_ANALYTICS' in the database
+
+q_master_history <- "SELECT * FROM CT_MASTER_HISTORY WHERE PAIRING_DATE > '2024-10-27' AND PAIRING_DATE < '2024-11-01' AND CREW_INDICATOR = 'FA';"
+
+ms <- dbGetQuery(db_connection, q_master_history) 
+
+
+```
+
+```{r}
+
+n_85_counts <- ms %>% 
+  mutate(update_dt = paste(UPDATE_DATE, UPDATE_TIME, sep = " ")) %>% 
+  group_by(CREW_ID, PAIRING_NO, PAIRING_DATE) %>% 
+  filter(update_dt == max(update_dt),
+         TRANSACTION_CODE == "N85") %>% 
+  ungroup() %>% 
+  group_by(PAIRING_DATE, BASE) %>% 
+  reframe(FA_N85_Counts=length(unique(CREW_ID)))
+
+
+```
+
