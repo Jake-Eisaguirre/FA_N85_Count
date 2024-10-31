@@ -11,7 +11,7 @@ if (!require(librarian)){
 }
 
 # librarian downloads, if not already downloaded, and reads in needed packages
-librarian::shelf(tidyverse, here, DBI, odbc, padr)
+librarian::shelf(tidyverse, here, DBI, odbc, padr, scales)
 
 ```
 
@@ -33,7 +33,7 @@ tryCatch({  # Attempts the database connection and catches any errors
 # Set search_path
 dbExecute(db_connection, "USE SCHEMA CREW_ANALYTICS")  # Sets the working schema to 'CREW_ANALYTICS' in the database
 
-q_master_history <- "SELECT * FROM CT_MASTER_HISTORY WHERE PAIRING_DATE > '2024-10-27' AND PAIRING_DATE < '2024-11-01' AND CREW_INDICATOR = 'FA';"
+q_master_history <- "SELECT * FROM CT_MASTER_HISTORY WHERE PAIRING_DATE > '2024-04-20';"
 
 ms <- dbGetQuery(db_connection, q_master_history) 
 
@@ -45,11 +45,42 @@ ms <- dbGetQuery(db_connection, q_master_history)
 n_85_counts <- ms %>% 
   mutate(update_dt = paste(UPDATE_DATE, UPDATE_TIME, sep = " ")) %>% 
   group_by(CREW_ID, PAIRING_NO, PAIRING_DATE) %>% 
-  filter(update_dt == max(update_dt),
-         TRANSACTION_CODE == "N85") %>% 
+  filter(update_dt == max(update_dt), TRANSACTION_CODE == "N85") %>% 
   ungroup() %>% 
   group_by(PAIRING_DATE, BASE) %>% 
-  reframe(FA_N85_Counts=length(unique(CREW_ID)))
+  summarize(FA_N85_Counts = n_distinct(CREW_ID), .groups = "drop") %>% 
+  # Complete the date range for each base and fill missing counts with zero
+  complete(PAIRING_DATE = seq.Date(min(ms$PAIRING_DATE), max(ms$PAIRING_DATE), by = "day"), BASE, fill = list(FA_N85_Counts = 0)) %>% 
+  mutate(PAIRING_YEAR_MONTH = format(PAIRING_DATE, "%Y-%m"))
+
+#write_csv(n_85_counts, here("n_85_counts.csv"))
+
+```
+
+```{r}
+
+ggplot(data = n_85_counts, aes(x = PAIRING_DATE, y = FA_N85_Counts, fill = BASE)) +
+  geom_col(width = 0.8) +
+  labs(
+    title = "FA N85 Counts by Pairing Date",
+    x = "Pairing Date (Year-Month)",
+    y = "FA N85 Counts"
+  ) +
+  scale_fill_manual(values = c("#5A2D81", "#EA4D8D")) +
+  scale_x_date(date_breaks = "1 month", date_labels = "%Y-%m") +  # Display every year-month
+  scale_y_continuous(expand = c(0, 0)) +  # Remove y-axis padding
+  facet_wrap(~ BASE, ncol = 1, scales = "free_y") +  # Separate charts per base, each with independent y-scales
+  theme_classic() +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 14, face = "bold"),
+    axis.title.x = element_text(size = 12),
+    axis.title.y = element_text(size = 12),
+    axis.text.x = element_text(angle = 45, hjust = 1),  # Rotate x-axis labels for readability
+    legend.position = "none"  # Remove legend as each chart is specific to one base
+  ) +
+  xlab("Pairing Date")
+
+
 
 
 ```
